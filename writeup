@@ -1,0 +1,13 @@
+Challenges.
+The major challenge was learning the pulse audio api. Since we have already
+done socket programming, the focus was to obtain the sampled audio data from
+mic and play the audio data from network. The pulse audio api has two
+interfaces, the simple and asynchronous. For our purpose the simple api was
+enough. Once succeeded in capturing and playing the audio, the basic ip phone
+was implemented using sockets. 
+
+Future Improvements.
+The audio data sent over the network is uncompressed and raw. So the
+transmission requires large bandwidth and also not secure. Real time noise
+cancellation can improve audio clarity. Also the data sampling should be done
+using periodic scheduling rather than using a while loop. 

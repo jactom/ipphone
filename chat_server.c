@@ -2,13 +2,13 @@
 #include <config.h>
 #endif
 
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
-#include<sys/socket.h>
-#include<arpa/inet.h>
-#include<unistd.h>
-#include<signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <signal.h>
 
 #include <pulse/simple.h>
 #include <pulse/error.h>
@@ -106,7 +106,7 @@ int main(int argc, char* argv[])
 
         printf("Connection accepted\n");
 
-        /* receive client messages */
+        /* receive client audio*/
         while((numbytes = recv(c_sock, message_buf, MAX_SIZE, 0)) > 0){
 #if 0
             pa_usec_t latency;
