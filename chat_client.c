@@ -8,9 +8,11 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <pthread.h>
 #include <unistd.h>
 #include <signal.h>
 #include <errno.h>
+#include <time.h>
 #include <pulse/simple.h>
 #include <pulse/error.h>
 #include <pulse/gccmacro.h>
@@ -19,27 +21,11 @@
 
 int sock; //socket file descriptor.
 pa_simple *s = NULL;
+timer_t timerid;
 
+void sampler (union sigval);
+static ssize_t loop_write(int, const void*, size_t);
 /* A simple routine calling UNIX write() in a loop */
-static ssize_t loop_write(int fd, const void*data, size_t size) {
-	ssize_t ret = 0;
-
-	while (size > 0) {
-		ssize_t r;
-
-		if ((r = send(fd, data, size, 0)) < 0)
-			return r;
-
-		if (r == 0)
-			break;
-
-		ret += r;
-		data = (const uint8_t*) data + r;
-		size -= (size_t) r;
-	}
-
-	return ret;
-}
 
 /* client signal handler */
 void sig_handler(int signumber)
@@ -55,6 +41,7 @@ void sig_handler(int signumber)
 			if (s)
 				pa_simple_free(s);
 			close(sock);
+            timer_delete(timerid);
 			exit(0);
 		}else{
 			printf("Continuing..\n");
@@ -64,22 +51,49 @@ void sig_handler(int signumber)
 
 int main(int argc, char* argv[])
 {
-	if(argc != 3){ //usage is .cc <ip> <port>
+	if (argc != 3){ //usage is .cc <ip> <port>
 		fprintf(stderr,"Usage:cc ip port\n");
 		exit(1);
 	}
 
 	int c = 0;
 	struct sockaddr_in server;
-	char sendbuf[MAX_SIZE];
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+
+    struct sched_param parm;
+    parm.sched_priority = 255;
+    pthread_attr_setschedparam(&attr, &parm);
 
 	static const pa_sample_spec ss = {
 		.format = PA_SAMPLE_S16LE,
 		.rate = 44100,
 		.channels = 2
 	};
+
+    struct itimerspec per;
+    per.it_value.tv_sec = 0;
+    per.it_value.tv_nsec =3000000;
+    per.it_interval.tv_sec = 0;
+    per.it_interval.tv_nsec = 3000000;
 	int ret = 1;
 	int error;
+
+
+    /* create timer handler */
+    struct sigevent sig;
+    sig.sigev_notify = SIGEV_THREAD;
+    sig.sigev_notify_function = sampler;
+    sig.sigev_value.sival_int = 10;
+    sig. sigev_notify_attributes = &attr;
+
+    if ((timer_create(CLOCK_REALTIME, &sig, &timerid)) == -1) {
+      perror("timer: failed");
+      exit(1);
+    }
+    
+    printf("timer created\n");
 
 	if (!(s = pa_simple_new(NULL, argv[0], PA_STREAM_RECORD, NULL, "record", &ss, NULL, NULL, &error))) {
 		fprintf(stderr, __FILE__": pa_simple_new() failed: %s\n", pa_strerror(error));
@@ -87,7 +101,7 @@ int main(int argc, char* argv[])
 	}
 
 	/* create socket*/
-	if((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1){
+	if ((sock = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
 		perror("server: socket");
 		exit(1);
 	}
@@ -100,7 +114,7 @@ int main(int argc, char* argv[])
 	server.sin_port = htons(atoi(argv[2]));
 
 	/* connect */
-	if(connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0){
+	if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0){
 		perror("Connect failed.");
 		exit(1);
 	}
@@ -108,22 +122,18 @@ int main(int argc, char* argv[])
 	printf("Connected\n");
 
 	/* catch signal*/
-	if(signal(SIGINT, sig_handler) == SIG_ERR)
+	if (signal(SIGINT, sig_handler) == SIG_ERR)
 		printf("\ncan't catch SIGINT\n");
 
+    /* start timer */
+    if ((timer_settime(timerid, 0, &per,  NULL)) == -1) {
+      perror("timer_settime");
+      exit(1);
+    }
+
 	/*client alwas run! */
-	while(1){
+	while (1) {
 
-		uint8_t buf[MAX_SIZE];
-
-		/* catch audio... */
-		if (pa_simple_read(s, buf, sizeof(buf), &error) < 0) {
-			fprintf(stderr, __FILE__": pa_simple_read() failed: %s\n", pa_strerror(error));
-		}
-
-		if (loop_write(sock, buf, sizeof(buf)) != sizeof(buf)) {
-			fprintf(stderr, __FILE__": write() failed: %s\n", strerror(errno));
-		}
 
 	}
 
@@ -134,4 +144,41 @@ finish:
 		pa_simple_free(s);
 
 	return ret;
+}
+
+static ssize_t loop_write(int fd, const void*data, size_t size) 
+{
+  ssize_t ret = 0;
+
+  while (size > 0) {
+    ssize_t r;
+
+    if ((r = send(fd, data, size, 0)) < 0)
+      return r;
+
+    if (r == 0)
+      break;
+
+    ret += r;
+    data = (const uint8_t*) data + r;
+    size -= (size_t) r;
+  }
+
+  return ret;
+}
+
+void sampler (union sigval val)
+{
+
+  uint8_t buf[MAX_SIZE];
+  int error;
+
+  /* catch audio... */
+  if (pa_simple_read(s, buf, sizeof(buf), &error) < 0) {
+    fprintf(stderr, __FILE__": pa_simple_read() failed: %s\n", pa_strerror(error));
+  }
+
+  if (loop_write(sock, buf, sizeof(buf)) != sizeof(buf)) {
+    fprintf(stderr, __FILE__": write() failed: %s\n", strerror(errno));
+  }
 }
