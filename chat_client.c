@@ -18,7 +18,7 @@
 #include <pulse/gccmacro.h>
 
 #include "g711.c"
-#define MAX_SIZE 1024//character buffer size
+#define MAX_SIZE 8192//character buffer size
 
 int sock; //socket file descriptor.
 pa_simple *s = NULL;
@@ -39,8 +39,8 @@ void sig_handler(int signumber)
 
 		if(strcmp(ans, "y") == 0){
 			printf("Exiting....\n");
-			if (s)
-				pa_simple_free(s);
+//			if (s)
+//				pa_simple_free(s);
 			close(sock);
             timer_delete(timerid);
 			exit(0);
@@ -60,12 +60,12 @@ int main(int argc, char* argv[])
 	int c = 0;
 	struct sockaddr_in server;
 
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
+//    pthread_attr_t attr;
+//    pthread_attr_init(&attr);
 
-    struct sched_param parm;
-    parm.sched_priority = 255;
-    pthread_attr_setschedparam(&attr, &parm);
+//    struct sched_param parm;
+//    parm.sched_priority = 255;
+//    pthread_attr_setschedparam(&attr, &parm);
 
 	static const pa_sample_spec ss = {
 		.format = PA_SAMPLE_S16LE,
@@ -75,9 +75,9 @@ int main(int argc, char* argv[])
 
     struct itimerspec per;
     per.it_value.tv_sec = 0;
-    per.it_value.tv_nsec =30000000;
+    per.it_value.tv_nsec =100000;
     per.it_interval.tv_sec = 0;
-    per.it_interval.tv_nsec = 30000000;
+    per.it_interval.tv_nsec = 100000;
 	int ret = 1;
 	int error;
 
@@ -87,7 +87,7 @@ int main(int argc, char* argv[])
     sig.sigev_notify = SIGEV_THREAD;
     sig.sigev_notify_function = sampler;
     sig.sigev_value.sival_int = 10;
-    sig. sigev_notify_attributes = &attr;
+ //   sig. sigev_notify_attributes = &attr;
 
     if ((timer_create(CLOCK_REALTIME, &sig, &timerid)) == -1) {
       perror("timer: failed");
@@ -172,7 +172,7 @@ void sampler (union sigval val)
 {
 
   uint16_t buf1[MAX_SIZE];
-  uint8_t buf[MAX_SIZE];
+uint8_t buf[MAX_SIZE];
   int len, i;
   int error;
 

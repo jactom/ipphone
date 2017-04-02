@@ -15,7 +15,7 @@
 #include <pulse/gccmacro.h>
 #include "g711.c"
 
-#define MAX_SIZE 1024 
+#define MAX_SIZE 8192 
 #define BACKLOG 3
 
 int s_sock, c_sock; //file descriptors for sockets
@@ -45,7 +45,7 @@ int main(int argc, char* argv[])
 
     int i, j, len,  numbytes;
     struct sockaddr_in server, client;
-    char message_buf[MAX_SIZE];
+    uint8_t message_buf[MAX_SIZE];
     uint16_t m_buf[MAX_SIZE];
 
     static const pa_sample_spec ss = {
@@ -122,18 +122,16 @@ int main(int argc, char* argv[])
             fprintf(stderr, "%0.0f usec    \r", (float)latency);
 #endif
             /* ... and play it */
-            len = sizeof(message_buf) / sizeof(m_buf);
+            len = sizeof(message_buf) / sizeof(message_buf[0]);
             for(j = 0; j < len ; j++) {
-              m_buf[j] = alaw2linear(message_buf[i]);
+              m_buf[j] = alaw2linear(message_buf[j]);
             }
 
-            if (pa_simple_write(s, m_buf, (size_t) numbytes, &error) < 0) {
+            if (pa_simple_write(s, m_buf, (size_t) sizeof(m_buf), &error) < 0) {
                 fprintf(stderr, __FILE__": pa_simple_write() failed: %s\n", pa_strerror(error));
             }
 
 
-            memset(message_buf, '0', sizeof(message_buf));
-            memset(m_buf, '0', sizeof(m_buf));
         }
 
         if (numbytes == 0) {// if client disconnected wait for another.
