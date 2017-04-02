@@ -17,7 +17,8 @@
 #include <pulse/error.h>
 #include <pulse/gccmacro.h>
 
-#define MAX_SIZE 8192//character buffer size
+#include "g711.c"
+#define MAX_SIZE 1024//character buffer size
 
 int sock; //socket file descriptor.
 pa_simple *s = NULL;
@@ -74,9 +75,9 @@ int main(int argc, char* argv[])
 
     struct itimerspec per;
     per.it_value.tv_sec = 0;
-    per.it_value.tv_nsec =3000000;
+    per.it_value.tv_nsec =30000000;
     per.it_interval.tv_sec = 0;
-    per.it_interval.tv_nsec = 3000000;
+    per.it_interval.tv_nsec = 30000000;
 	int ret = 1;
 	int error;
 
@@ -170,13 +171,21 @@ static ssize_t loop_write(int fd, const void*data, size_t size)
 void sampler (union sigval val)
 {
 
+  uint16_t buf1[MAX_SIZE];
   uint8_t buf[MAX_SIZE];
+  int len, i;
   int error;
 
   /* catch audio... */
-  if (pa_simple_read(s, buf, sizeof(buf), &error) < 0) {
+  if (pa_simple_read(s, buf1, sizeof(buf1), &error) < 0) {
     fprintf(stderr, __FILE__": pa_simple_read() failed: %s\n", pa_strerror(error));
   }
+
+  len = sizeof(buf1) / sizeof(buf1[0]);
+  
+  for(i = 0; i < len; i++) {
+    buf[i] = linear2alaw(buf1[i]);
+  }  
 
   if (loop_write(sock, buf, sizeof(buf)) != sizeof(buf)) {
     fprintf(stderr, __FILE__": write() failed: %s\n", strerror(errno));

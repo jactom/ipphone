@@ -13,8 +13,9 @@
 #include <pulse/simple.h>
 #include <pulse/error.h>
 #include <pulse/gccmacro.h>
+#include "g711.c"
 
-#define MAX_SIZE 8192
+#define MAX_SIZE 1024 
 #define BACKLOG 3
 
 int s_sock, c_sock; //file descriptors for sockets
@@ -42,9 +43,10 @@ int main(int argc, char* argv[])
         exit(1);
     }
 
-    int i, numbytes;
+    int i, j, len,  numbytes;
     struct sockaddr_in server, client;
     char message_buf[MAX_SIZE];
+    uint16_t m_buf[MAX_SIZE];
 
     static const pa_sample_spec ss = {
         .format = PA_SAMPLE_S16LE,
@@ -65,7 +67,8 @@ int main(int argc, char* argv[])
 
     /* clear memory to avoid undefined behaviour */
     memset(&server, '0', sizeof(server));
-    memset(&message_buf, '0', sizeof(message_buf));
+    memset(message_buf, '0', sizeof(message_buf));
+    memset(m_buf, '0', sizeof(m_buf));
 
     /* configure socket */
     server.sin_family = AF_INET;
@@ -119,11 +122,18 @@ int main(int argc, char* argv[])
             fprintf(stderr, "%0.0f usec    \r", (float)latency);
 #endif
             /* ... and play it */
-            if (pa_simple_write(s, message_buf, (size_t) numbytes, &error) < 0) {
+            len = sizeof(message_buf) / sizeof(m_buf);
+            for(j = 0; j < len ; j++) {
+              m_buf[j] = alaw2linear(message_buf[i]);
+            }
+
+            if (pa_simple_write(s, m_buf, (size_t) numbytes, &error) < 0) {
                 fprintf(stderr, __FILE__": pa_simple_write() failed: %s\n", pa_strerror(error));
             }
 
+
             memset(message_buf, '0', sizeof(message_buf));
+            memset(m_buf, '0', sizeof(m_buf));
         }
 
         if (numbytes == 0) {// if client disconnected wait for another.
