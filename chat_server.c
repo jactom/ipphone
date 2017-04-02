@@ -66,9 +66,7 @@ int main(int argc, char* argv[])
     printf("Socket created\n");
 
     /* clear memory to avoid undefined behaviour */
-    memset(&server, '0', sizeof(server));
-    memset(message_buf, '0', sizeof(message_buf));
-    memset(m_buf, '0', sizeof(m_buf));
+    memset(&server, 0, sizeof(server));
 
     /* configure socket */
     server.sin_family = AF_INET;
@@ -110,7 +108,7 @@ int main(int argc, char* argv[])
         printf("Connection accepted\n");
 
         /* receive client audio*/
-        while((numbytes = recv(c_sock, message_buf, MAX_SIZE, 0)) > 0){
+        while((numbytes = recv(c_sock, message_buf, sizeof(message_buf), 0)) > 0){
 #if 0
             pa_usec_t latency;
 
@@ -124,7 +122,7 @@ int main(int argc, char* argv[])
             /* ... and play it */
             len = sizeof(message_buf) / sizeof(message_buf[0]);
             for(j = 0; j < len ; j++) {
-              m_buf[j] = alaw2linear(message_buf[j]);
+              m_buf[j] = Snack_Mulaw2Lin(message_buf[j]);
             }
 
             if (pa_simple_write(s, m_buf, (size_t) sizeof(m_buf), &error) < 0) {

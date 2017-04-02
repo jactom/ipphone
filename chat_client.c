@@ -24,7 +24,7 @@ int sock; //socket file descriptor.
 pa_simple *s = NULL;
 timer_t timerid;
 
-void sampler (union sigval);
+void sampler (int signal);
 static ssize_t loop_write(int, const void*, size_t);
 /* A simple routine calling UNIX write() in a loop */
 
@@ -60,12 +60,12 @@ int main(int argc, char* argv[])
 	int c = 0;
 	struct sockaddr_in server;
 
-//    pthread_attr_t attr;
-//    pthread_attr_init(&attr);
+   // pthread_attr_t attr;
+   // pthread_attr_init(&attr);
 
-//    struct sched_param parm;
-//    parm.sched_priority = 255;
-//    pthread_attr_setschedparam(&attr, &parm);
+   // struct sched_param parm;
+   // parm.sched_priority = 255;
+   // pthread_attr_setschedparam(&attr, &parm);
 
 	static const pa_sample_spec ss = {
 		.format = PA_SAMPLE_S16LE,
@@ -83,13 +83,17 @@ int main(int argc, char* argv[])
 
 
     /* create timer handler */
-    struct sigevent sig;
-    sig.sigev_notify = SIGEV_THREAD;
-    sig.sigev_notify_function = sampler;
-    sig.sigev_value.sival_int = 10;
- //   sig. sigev_notify_attributes = &attr;
+    //struct sigevent sig;
+    //sig.sigev_notify = SIGEV_THREAD;
+    //sig.sigev_notify_function = sampler;
+    //sig.sigev_value.sival_int = 10;
+    //sig. sigev_notify_attributes = &attr;
 
-    if ((timer_create(CLOCK_REALTIME, &sig, &timerid)) == -1) {
+    if (signal(SIGALRM, sampler) == SIG_ERR) {
+      perror("Signal");
+    }
+
+    if ((timer_create(CLOCK_REALTIME, NULL, &timerid)) == -1) {
       perror("timer: failed");
       exit(1);
     }
@@ -139,55 +143,33 @@ int main(int argc, char* argv[])
 	}
 
 
-finish:
-
-	if (s)
-		pa_simple_free(s);
-
-	return ret;
 }
 
-static ssize_t loop_write(int fd, const void*data, size_t size) 
-{
-  ssize_t ret = 0;
 
-  while (size > 0) {
-    ssize_t r;
-
-    if ((r = send(fd, data, size, 0)) < 0)
-      return r;
-
-    if (r == 0)
-      break;
-
-    ret += r;
-    data = (const uint8_t*) data + r;
-    size -= (size_t) r;
-  }
-
-  return ret;
-}
-
-void sampler (union sigval val)
+void sampler (int signal)
 {
 
   uint16_t buf1[MAX_SIZE];
-uint8_t buf[MAX_SIZE];
+  uint8_t buf[MAX_SIZE];
   int len, i;
   int error;
+  if (signal == SIGALRM) {
+    /* catch audio... */
+    if (pa_simple_read(s, buf1, sizeof(buf1), &error) < 0) {
+      fprintf(stderr, __FILE__": pa_simple_read() failed: %s\n", pa_strerror(error));
+    }
 
-  /* catch audio... */
-  if (pa_simple_read(s, buf1, sizeof(buf1), &error) < 0) {
-    fprintf(stderr, __FILE__": pa_simple_read() failed: %s\n", pa_strerror(error));
-  }
+    len = sizeof(buf1) / sizeof(buf1[0]);
 
-  len = sizeof(buf1) / sizeof(buf1[0]);
-  
-  for(i = 0; i < len; i++) {
-    buf[i] = linear2alaw(buf1[i]);
-  }  
+    for(i = 0; i < len; i++) {
+      buf[i] = Snack_Lin2Mulaw(buf1[i]);
+    }  
 
-  if (loop_write(sock, buf, sizeof(buf)) != sizeof(buf)) {
-    fprintf(stderr, __FILE__": write() failed: %s\n", strerror(errno));
+   // if (loop_write(sock, buf, sizeof(buf)) != sizeof(buf)) {
+   //   fprintf(stderr, __FILE__": write() failed: %s\n", strerror(errno));
+   // }
+    if (send(sock, buf, sizeof(buf), 0) == -1){
+      perror("send");
+    }
   }
 }
