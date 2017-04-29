@@ -5,151 +5,144 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
 #include <unistd.h>
 #include <signal.h>
+#include <ortp/ortp.h>
+#include <bctoolbox/vfs.h>
 
 #include <pulse/simple.h>
 #include <pulse/error.h>
 #include <pulse/gccmacro.h>
 #include "g711.c"
 
-#define MAX_SIZE 8192 
+#define MAX_SIZE 160
 #define BACKLOG 3
 
-int s_sock, c_sock; //file descriptors for sockets
-    pa_simple *s = NULL;
-
+int cond = 1;
+pa_simple *s = NULL;
+RtpSession *session;
 /* signal handler */
 void sig_handler(int signumber)
 {
-    if (signumber == SIGINT) {
-        printf("\nreceived CTRL-C\n Terminating....\n");
-        close(s_sock);
-        close(c_sock);
+  if (signumber == SIGINT) {
+    printf("\nreceived CTRL-C\n Terminating....\n");
 
-        if (s)
-            pa_simple_free(s);
+    cond = 0;
+  }
+}
 
-        exit(0);
-    }
+void ssrc_cb(RtpSession *session) 
+{
+  printf("ssrc changed\n");
 }
 
 int main(int argc, char* argv[])
 {
-    if(argc != 2){// usage : ./cs <port number>
-        fprintf(stderr,"usage : cs port\n");
-        exit(1);
+  if(argc != 2){// usage : ./cs <port number>
+    fprintf(stderr,"usage : cs port\n");
+    exit(1);
+  }
+
+  int i, j, len,  numbytes;
+  uint8_t message_buf[MAX_SIZE];
+  uint16_t m_buf[MAX_SIZE];
+  int err;
+  uint32_t ts = 0;
+  int stream_received = 0;
+  int local_port;
+  int have_more;
+  int jittcomp = 40;
+  bool_t adapt = TRUE;
+
+  static const pa_sample_spec ss = {
+    .format = PA_SAMPLE_S16LE,
+    .rate = 44100,
+    .channels = 2
+  };
+
+  int ret = 1;
+  int error;
+
+  local_port = atoi(argv[1]);
+
+  for (i = 2; i < argc; i++) {
+    if (strcmp(argv[i], "--noadapt") == 0) adapt = FALSE;
+    if (strcmp(argv[i], "--with-jitter") == 0) {
+      i++;
+      if (i < argc) {
+        jittcomp = atoi(argv[i]);
+        printf("Using jitter");
+      }
     }
+  }
 
-    int i, j, len,  numbytes;
-    struct sockaddr_in server, client;
-    uint8_t message_buf[MAX_SIZE];
-    uint16_t m_buf[MAX_SIZE];
+  ortp_init();
+  ortp_scheduler_init();
+  ortp_set_log_level_mask( ORTP_DEBUG | ORTP_MESSAGE | ORTP_WARNING | ORTP_ERROR);
+  signal(SIGINT, sig_handler);
+  session=rtp_session_new(RTP_SESSION_RECVONLY);  
+  rtp_session_set_scheduling_mode(session, 1);
+  rtp_session_set_blocking_mode(session, 1);
+  rtp_session_set_local_addr(session,"127.0.0.1", atoi(argv[1]), atoi(argv[1]) + 1);
+  rtp_session_set_connected_mode(session, TRUE);
+  rtp_session_set_symmetric_rtp(session, TRUE);
+  rtp_session_enable_adaptive_jitter_compensation(session, adapt);
+  rtp_session_set_jitter_compensation(session, jittcomp);
+  rtp_session_set_payload_type(session, 1);
+  rtp_session_signal_connect(session, "ssrc_changed", (RtpCallback)ssrc_cb, 0);
+  rtp_session_signal_connect(session, "ssrc_changed", (RtpCallback)rtp_session_reset, 0);
 
-    static const pa_sample_spec ss = {
-        .format = PA_SAMPLE_S16LE,
-        .rate = 44100,
-        .channels = 2
-    };
+  /* create socket */
+  /* clear memory to avoid undefined behaviour */
 
-    int ret = 1;
-    int error;
+  /* configure socket */
 
-    /* create socket */
-    if((s_sock = socket(AF_INET, SOCK_STREAM, 0)) == -1){
-        perror("server: socket");
-        exit(1);
-    }
+  if (!(s = pa_simple_new(NULL, argv[0], PA_STREAM_PLAYBACK, NULL, "playback", &ss, NULL, NULL, &error))) {
+    fprintf(stderr, __FILE__": pa_simple_new() failed: %s\n", pa_strerror(error));
+    exit(1);
+  }
 
-    printf("Socket created\n");
+  /* listening */
 
-    /* clear memory to avoid undefined behaviour */
-    memset(&server, 0, sizeof(server));
+  /*catch signal */
 
-    /* configure socket */
-    server.sin_family = AF_INET;
-    server.sin_addr.s_addr = INADDR_ANY;
-    server.sin_port = htons(atoi(argv[1]));
-
-    /* binding socket */
-    if(bind(s_sock, (struct sockaddr *)&server, sizeof(server)) < 0){
-        perror("bind");
-        exit(1);
-    }
-
-    printf("bind done\n");
-
-    if (!(s = pa_simple_new(NULL, argv[0], PA_STREAM_PLAYBACK, NULL, "playback", &ss, NULL, NULL, &error))) {
-        fprintf(stderr, __FILE__": pa_simple_new() failed: %s\n", pa_strerror(error));
-        exit(1);
-    }
-
-    /* listening */
-    listen(s_sock, BACKLOG);
-
-    /*catch signal */
-    if(signal(SIGINT, sig_handler) == SIG_ERR)
-        printf("\n can't catch sigint\n");
-
-    /* server waits for client */
-    while(1){
-
-        printf("Waiting for incoming connections...\n");
-        i = sizeof(struct sockaddr_in);
-
-        /* accept client connection */
-        if((c_sock = accept(s_sock, (struct sockaddr *)&client, (socklen_t*)&i)) < 0){
-            perror("accept failed");
-            exit(1);
+  /* server waits for client */
+  while (cond){
+    have_more = 1;
+    while (have_more) {
+      err = rtp_session_recv_with_ts(session, message_buf, MAX_SIZE, ts, &have_more);
+      if (err > 0) stream_received = 1;
+      if ((stream_received) && (err > 0)) {
+        len = err;//sizeof(message_buf) / sizeof(message_buf[0]);
+        for(j = 0; j < len ; j++) {
+          m_buf[j] = Snack_Mulaw2Lin(message_buf[j]);
         }
 
-        printf("Connection accepted\n");
-
-        /* receive client audio*/
-        while((numbytes = recv(c_sock, message_buf, sizeof(message_buf), 0)) > 0){
-#if 0
-            pa_usec_t latency;
-
-            if ((latency = pa_simple_get_latency(s, &error)) == (pa_usec_t) -1) {
-                fprintf(stderr, __FILE__": pa_simple_get_latency() failed: %s\n", pa_strerror(error));
-                goto finish;
-            }
-
-            fprintf(stderr, "%0.0f usec    \r", (float)latency);
-#endif
-            /* ... and play it */
-            len = sizeof(message_buf) / sizeof(message_buf[0]);
-            for(j = 0; j < len ; j++) {
-              m_buf[j] = Snack_Mulaw2Lin(message_buf[j]);
-            }
-
-            if (pa_simple_write(s, m_buf, (size_t) sizeof(m_buf), &error) < 0) {
-                fprintf(stderr, __FILE__": pa_simple_write() failed: %s\n", pa_strerror(error));
-            }
-
-
+        if (pa_simple_write(s, m_buf, (size_t) len, &error) < 0) {
+          fprintf(stderr, __FILE__": pa_simple_write() failed: %s\n", pa_strerror(error));
         }
 
-        if (numbytes == 0) {// if client disconnected wait for another.
-            if (pa_simple_drain(s, &error) < 0) {
-                fprintf(stderr, __FILE__": pa_simple_drain() failed: %s\n", pa_strerror(error));
-            }
+      }
 
-            if (pa_simple_flush(s, &error) < 0) {
-                fprintf(stderr, __FILE__": pa_simple_flush() failed: %s\n", pa_strerror(error));
-            }
 
-            printf("Client disconnected\n");
-            fflush(stdout);
-            continue;
-        }
-
-        if(numbytes == -1)
-            perror("recv failed");
     }
+    ts += MAX_SIZE;
+    /* accept client connection */
+    /* receive client audio*/
+    /* ... and play it */
+
+  }
 
 
-    return 0;
+  if (s)
+    pa_simple_free(s);
+
+  exit(0);
+
+  rtp_session_destroy(session);
+  ortp_exit();
+
+  ortp_global_stats_display();
+
+  return 0;
 }
